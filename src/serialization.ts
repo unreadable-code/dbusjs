@@ -149,7 +149,7 @@ class PrimitiveSerializer implements Serializer {
 }
 
 class StructSerializer implements Serializer {
-    constructor(private readonly fields: Serializer[]) {
+    constructor(protected readonly fields: Serializer[]) {
         // do nothing
     }
 
@@ -176,6 +176,25 @@ class StructSerializer implements Serializer {
         const writer = new Writer(buffer);
         this.serializeInto(writer, values);
         return new Uint8Array(buffer);
+    }
+}
+
+export class ArraySerializer extends StructSerializer {
+    estimateBytesLength(value: Value): number {
+        const values = value as ReadonlyArray<Value>;
+
+        let result = 0;
+        for (let n = 0; n < values.length; ++n)
+            result += super.estimateBytesLength(values[n]);
+
+        return result;
+    }
+
+    serializeInto(writer: Writer, value: Value): void {
+        const values = value as ReadonlyArray<Value>;
+
+        for (let n = 0; n < values.length; ++n)
+            super.serializeInto(writer, values[n]);
     }
 }
 
