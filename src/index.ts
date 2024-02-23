@@ -20,6 +20,11 @@ export {
 } from "./introspection";
 
 export {
+    SerializationError,
+    parseSignature,
+} from "./serialization";
+
+export {
     type Address,
     type AuthMethod,
     type UnixDomainAbstractAddress,
