@@ -1,3 +1,5 @@
+import {DataType, MessageType, type Headers} from ".";
+
 export class SerializationError extends Error {
     constructor(
         public readonly signature: string,
@@ -112,7 +114,6 @@ interface WriterMethodErasure {
     (value: Value): void;
 }
 
-type PrimitiveTypeCode = "ybnqiuxtd"; // TODO: h
 // type VariableTypeCode = "sogv";
 // type ReservedTypeCode = "rem*?@&^";
 
@@ -134,16 +135,16 @@ class PrimitiveSerializer implements Serializer {
         this.method.call(writer, value);
     }
 
-    static instances: {[K in PrimitiveTypeCode[number]]: PrimitiveSerializer} = {
-        "y": new PrimitiveSerializer(1, Writer.prototype.writeByte),
-        "b": new PrimitiveSerializer(4, Writer.prototype.writeBool),
-        "n": new PrimitiveSerializer(2, Writer.prototype.writeInt16),
-        "q": new PrimitiveSerializer(2, Writer.prototype.writeUInt16),
-        "i": new PrimitiveSerializer(4, Writer.prototype.writeInt32),
-        "u": new PrimitiveSerializer(4, Writer.prototype.writeUInt32),
-        "x": new PrimitiveSerializer(8, Writer.prototype.writeInt64),
-        "t": new PrimitiveSerializer(8, Writer.prototype.writeUInt64),
-        "d": new PrimitiveSerializer(8, Writer.prototype.writeDouble),
+    static instances: {[K in DataType[number]]: PrimitiveSerializer} = {
+        [DataType.Byte]: new PrimitiveSerializer(1, Writer.prototype.writeByte),
+        [DataType.Boolean]: new PrimitiveSerializer(4, Writer.prototype.writeBool),
+        [DataType.Int16]: new PrimitiveSerializer(2, Writer.prototype.writeInt16),
+        [DataType.Int32]: new PrimitiveSerializer(4, Writer.prototype.writeInt32),
+        [DataType.Int64]: new PrimitiveSerializer(8, Writer.prototype.writeInt64),
+        [DataType.Unsigned16]: new PrimitiveSerializer(2, Writer.prototype.writeUInt16),
+        [DataType.Unsigned32]: new PrimitiveSerializer(4, Writer.prototype.writeUInt32),
+        [DataType.Unsigned64]: new PrimitiveSerializer(8, Writer.prototype.writeUInt64),
+        [DataType.Double]: new PrimitiveSerializer(8, Writer.prototype.writeDouble),
         // TODO: "h": new PrimitiveSerializer(4, Writer.prototype.writeUInt32),
     };
 }
@@ -168,14 +169,6 @@ class StructSerializer implements Serializer {
 
         for (let n = 0; n < this.fields.length; ++n)
             this.fields[n].serializeInto(writer, values[n]);
-    }
-
-    serialize(values: ReadonlyArray<Value>, padding?: number): Uint8Array {
-        const size = this.estimateBytesLength(values);
-        const buffer = new ArrayBuffer(size + (padding || 64));
-        const writer = new Writer(buffer);
-        this.serializeInto(writer, values);
-        return new Uint8Array(buffer);
     }
 }
 
@@ -309,4 +302,81 @@ export function parseSignature(signature: string): StructSerializer {
     }
 
     return builder.build(signature);
+}
+
+interface FieldDefinition {
+    id: number,
+    type: DataType,
+}
+
+const headerDefinitions: Record<string, FieldDefinition> = {
+    "path": {
+        id: 1,
+        type: DataType.ObjectPath,
+    },
+    "interface": {
+        id: 2,
+        type: DataType.String,
+    },
+    "member": {
+        id: 3,
+        type: DataType.String,
+    },
+    "errorName": {
+        id: 4,
+        type: DataType.String,
+    },
+    "replySerial": {
+        id: 5,
+        type: DataType.Unsigned32,
+    },
+    "destination": {
+        id: 6,
+        type: DataType.String,
+    },
+    "sender": {
+        id: 7,
+        type: DataType.String,
+    },
+    "signature": {
+        id: 8,
+        type: DataType.TypeSignature,
+    },
+};
+
+export function serializeMessage(serial: number, headers: Headers, serializer: StructSerializer, values: ReadonlyArray<Value>): Uint8Array {
+    const headerSerializers = [];
+    const headerValues: Value[] = [];
+    for (const propertyName of Object.keys(headers)) {
+        const definition = headerDefinitions[propertyName];
+        if (definition) {
+            headerSerializers.push(PrimitiveSerializer.instances[definition.type]);
+            headerValues.push(headers[propertyName as keyof Headers]!);
+        }
+    }
+
+    const headerSerializer = new StructSerializer(headerSerializers);
+    const headerSize = headerSerializer.estimateBytesLength(headerValues);
+    const bodySize = serializer.estimateBytesLength(values);
+
+    const paddedHeaderSize = 12 + 8 * Math.trunc(1 + headerSize / 8);
+    const buffer = new ArrayBuffer(paddedHeaderSize + bodySize);
+    const writer = new Writer(buffer);
+
+    // serialize the static part header (12 bytes)
+    writer.writeByte(108); // little endian
+    writer.writeByte(MessageType.MethodCall);
+    writer.writeByte(0);
+    writer.writeByte(1); // protocol version 1
+    writer.writeUInt32(paddedHeaderSize);
+    writer.writeUInt32(serial);
+
+    // serialize the variable part of the header
+    headerSerializer.serializeInto(writer, headerValues);
+    writer.pad(8);
+
+    // serialize the arguments
+    serializer.serializeInto(writer, values);
+
+    return new Uint8Array(buffer);
 }

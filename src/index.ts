@@ -1,14 +1,44 @@
 export const enum DataType {
-    integer = "i",
-    string = "s",
-    boolean = "b",
-    // TODO
+    String = "s",
+    Boolean = "b",
+    ObjectPath = "o",
+    Byte = "y",
+
+    Unsigned16 = "q",
+    Unsigned32 = "u",
+    Unsigned64 = "t",
+
+    Int16 = "n",
+    Int32 = "i",
+    Int64 = "x",
+
+    TypeSignature = "g",
+    Double = "d",
 }
 
 export class XMLError extends Error {
     constructor(readonly document: XMLDocument, message: string) {
         super(message);
     }
+}
+
+export enum MessageType {
+    Invalid = 0,
+    MethodCall,
+    MethodReturn,
+    Error,
+    Signal,
+}
+
+export interface Headers {
+    destination?: string;
+    path?: string;
+    interface?: string;
+    member?: string;
+    replySerial?: number;
+    errorName?: string;
+    sender?: string;
+    signature?: string;
 }
 
 export {
