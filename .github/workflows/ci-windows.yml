@@ -5,9 +5,9 @@ name: Windows-CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ legacy ]
   pull_request:
-    branches: [ master ]
+    branches: [ legacy ]
 
 jobs:
   build:
