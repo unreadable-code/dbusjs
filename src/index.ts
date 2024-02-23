@@ -18,3 +18,12 @@ export {
     type SignalSpecification,
     type ValueSpecification,
 } from "./introspection";
+
+export {
+    type Address,
+    type AuthMethod,
+    type UnixDomainAbstractAddress,
+    type UnixDomainPathAddress,
+    type UnixDomainSocketAddress,
+    parseAddress,
+} from "./transport";

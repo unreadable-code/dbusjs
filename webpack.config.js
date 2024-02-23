@@ -6,4 +6,4 @@ const pathBuild = path.resolve(__dirname, "dist");
 
 module.exports = newConfigBuilder()
     .asLibrary("umd", "dbusjs")
-    .compile("web", "/src/index.ts", pathBuild, "index.js");
+    .compile("node", "/src/index.ts", pathBuild, "index.js");
