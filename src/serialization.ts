@@ -28,28 +28,27 @@ class Writer {
         this.offset += length;
     }
 
-    writeString(value: string): void {
-        this.pad(4);
-        this.view.setUint32(this.offset, value.length, true);
+    private encodeString(value: string): number {
         const allocated = value.length;
         const strview = new Uint8Array(this.view.buffer, this.offset, allocated);
         const progress = new TextEncoder().encodeInto(value, strview);
         if (progress.read < value.length) {
             // TODO: handle resizing
         }
-        this.offset += 5 + allocated;
+
+        return allocated;
+    }
+
+    writeString(value: string): void {
+        this.pad(4);
+        this.view.setUint32(this.offset, value.length, true);
+        this.offset += 5 + this.encodeString(value);
         this.view.setUint8(this.offset - 1, 0);
     }
 
     writeSignature(value: string): void {
         this.view.setUint8(this.offset, value.length);
-        const allocated = value.length;
-        const strview = new Uint8Array(this.view.buffer, this.offset, allocated);
-        const progress = new TextEncoder().encodeInto(value, strview);
-        if (progress.read < value.length) {
-            // TODO: handle resizing
-        }
-        this.offset += 2 + allocated;
+        this.offset += 2 + this.encodeString(value);
         this.view.setUint8(this.offset - 1, 0);
     }
 
@@ -220,6 +219,18 @@ class StringSerializer implements Serializer {
     static readonly instance = new StringSerializer();
 }
 
+class SignatureSerializer implements Serializer {
+    estimateBytesLength(value: Value): number {
+        return 2 + (value as string).length;
+    }
+
+    serializeInto(writer: Writer, value: Value): void {
+        writer.writeSignature(value as string)
+    }
+
+    static readonly instance = new SignatureSerializer();
+}
+
 export const emptySerializer = new StructSerializer([]);
 
 const enum CompositeKind {
@@ -312,16 +323,14 @@ export function parseSignature(signature: string): StructSerializer {
             builder.endComposite(CompositeKind.Struct, signature);
             break;
 
+        case "o":
+            // TODO: add validation
         case "s":
             builder.add(StringSerializer.instance);
             break;
 
-        case "o":
-            // TODO
-            break;
-
         case "g":
-            // TODO
+            builder.add(SignatureSerializer.instance);
             break;
 
         default:
