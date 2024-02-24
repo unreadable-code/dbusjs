@@ -30,7 +30,7 @@ class Writer {
 
     writeString(value: string): void {
         this.pad(4);
-        this.view.setInt32(this.offset, value.length, true);
+        this.view.setUint32(this.offset, value.length, true);
         const allocated = value.length;
         const strview = new Uint8Array(this.view.buffer, this.offset, allocated);
         const progress = new TextEncoder().encodeInto(value, strview);
@@ -208,6 +208,18 @@ class ArraySerializer extends StructSerializer {
     }
 }
 
+class StringSerializer implements Serializer {
+    estimateBytesLength(value: Value): number {
+        return 5 + (value as string).length;
+    }
+
+    serializeInto(writer: Writer, value: Value): void {
+        writer.writeString(value as string)
+    }
+
+    static readonly instance = new StringSerializer();
+}
+
 export const emptySerializer = new StructSerializer([]);
 
 const enum CompositeKind {
@@ -301,7 +313,7 @@ export function parseSignature(signature: string): StructSerializer {
             break;
 
         case "s":
-            // TODO
+            builder.add(StringSerializer.instance);
             break;
 
         case "o":
