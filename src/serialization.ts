@@ -111,9 +111,14 @@ class Writer {
         this.view.setFloat64(this.offset, value, true);
         this.offset += 8;
     }
+
+    append(value: Uint8Array): void {
+        new Uint8Array(this.view.buffer).set(value, this.offset);
+        this.offset += value.length;
+    }
 }
 
-type Value = number | string | boolean | bigint | ReadonlyArray<Value>;
+type Value = number | string | boolean | bigint | Uint8Array | ReadonlyArray<Value>;
 
 interface Serializer {
     estimateBytesLength(value: Value): number;
@@ -124,8 +129,6 @@ interface WriterMethodErasure {
     (value: Value): void;
 }
 
-// type VariableTypeCode = "sogv";
-// type ReservedTypeCode = "rem*?@&^";
 
 class PrimitiveSerializer implements Serializer {
     private readonly method: (this: Writer, value: Value) => void;
@@ -231,6 +234,18 @@ class SignatureSerializer implements Serializer {
     static readonly instance = new SignatureSerializer();
 }
 
+class PassthroughSerializer implements Serializer {
+    estimateBytesLength(value: Value): number {
+        return (value as Uint8Array).length;
+    }
+
+    serializeInto(writer: Writer, value: Value): void {
+        writer.append(value as Uint8Array);
+    }
+
+    static readonly instance = new PassthroughSerializer();
+}
+
 export const emptySerializer = new StructSerializer([]);
 
 const enum CompositeKind {
@@ -273,7 +288,7 @@ class SerializerBuilder {
             this.current.elements.push(candidate);
             return true;
         }
-        
+
         return false;
     }
 
@@ -300,6 +315,8 @@ class SerializerBuilder {
         return this.current.build(signature);
     }
 }
+
+// type ReservedTypeCode = "rem*?@&^";
 
 export function parseSignature(signature: string): StructSerializer {
     const builder = new SerializerBuilder();
@@ -331,6 +348,10 @@ export function parseSignature(signature: string): StructSerializer {
 
         case "g":
             builder.add(SignatureSerializer.instance);
+            break;
+
+        case "v":
+            builder.add(PassthroughSerializer.instance);
             break;
 
         default:
