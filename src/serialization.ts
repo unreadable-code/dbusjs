@@ -18,6 +18,10 @@ class Writer {
         this.view = new DataView(buffer);
     }
 
+    get position(): number {
+        return this.offset;
+    }
+
     pad(length: number): void {
         length -= this.offset % length;
         new Uint8Array(this.view.buffer, this.offset, length);
@@ -76,6 +80,13 @@ class Writer {
         this.pad(4);
         this.view.setInt32(this.offset, value, true);
         this.offset += 4;
+    }
+
+    deferUInt32(): (value: number) => void {
+        this.pad(4);
+        const position = this.offset;
+        this.offset += 4;
+        return value => this.view.setUint32(position, value, true);
     }
 
     writeUInt32(value: number): void {
@@ -170,9 +181,10 @@ class StructSerializer implements Serializer {
         for (let n = 0; n < this.fields.length; ++n)
             this.fields[n].serializeInto(writer, values[n]);
     }
+
 }
 
-export class ArraySerializer extends StructSerializer {
+class ArraySerializer extends StructSerializer {
     estimateBytesLength(value: Value): number {
         const values = value as ReadonlyArray<Value>;
 
@@ -186,10 +198,17 @@ export class ArraySerializer extends StructSerializer {
     serializeInto(writer: Writer, value: Value): void {
         const values = value as ReadonlyArray<Value>;
 
-        for (let n = 0; n < values.length; ++n)
+        const count = values.length;
+        const startingPosition = writer.position;
+        const deferred = writer.deferUInt32();
+        for (let n = 0; n < count; ++n)
             super.serializeInto(writer, values[n]);
+
+        deferred(writer.position - startingPosition - 4);
     }
 }
+
+export const emptySerializer = new StructSerializer([]);
 
 const enum CompositeKind {
     Array = "a",
@@ -344,7 +363,12 @@ const headerDefinitions: Record<string, FieldDefinition> = {
     },
 };
 
-export function serializeMessage(serial: number, headers: Headers, serializer: StructSerializer, values: ReadonlyArray<Value>): Uint8Array {
+export function serializeMessage(
+    serial: number,
+    headers: Headers,
+    serializer: Serializer,
+    values: ReadonlyArray<Value>,
+): Uint8Array {
     const headerSerializers = [];
     const headerValues: Value[] = [];
     for (const propertyName of Object.keys(headers)) {
