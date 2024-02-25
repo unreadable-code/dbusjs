@@ -66,26 +66,28 @@ export class Builder {
     setHeader(id: Header.Signature, type: DataType.TypeSignature, value: string): void;
     setHeader(id: number, type: DataType, value: ScalarValue): void {
         this.headers[id] = {type, value};
-        this.writer.seek(16);
     }
 
-    build(serial: number, serializer: Serializer, values: ReadonlyArray<Value>): ArrayBuffer {
-        if (this.writer.position === 16) {
-            for (let n = 1; n < this.headers.length; ++n) {
-                const header = this.headers[n];
-                if (header) {
-                    this.writer.writeByte(n);
-                    signatureSerializer.serializeInto(this.writer, header.type);
-                    getValueSerializer(header.type)
-                        .serializeInto(this.writer, header.value);
-                }
-            }
+    private writeHeader(id: Header, type: DataType, value: ScalarValue) {
+        this.writer.writeByte(id);
+        signatureSerializer.serializeInto(this.writer, type);
+        getValueSerializer(type)
+            .serializeInto(this.writer, value);
+    }
 
-            // header fields array size is always aligned at 12
-            this.writer.view.setUint32(12, this.writer.position, true);
-        } else {
-            this.writer.seek(this.writer.view.getUint32(12, true));
+    build(serializer: Serializer, values: ReadonlyArray<Value>): ArrayBuffer {
+        this.writer.seek(16);
+
+        for (let n = 1; n < this.headers.length; ++n) {
+            const header = this.headers[n];
+            if (header)
+                this.writeHeader(n, header.type, header.value);
         }
+
+        this.writeHeader(Header.Signature, DataType.TypeSignature, serializer.signature);
+
+        // header fields array size is always aligned at 12
+        this.writer.view.setUint32(12, this.writer.position, true);
 
         // must ensure body is aligned to 8 bytes
         this.writer.pad(8);
@@ -95,8 +97,6 @@ export class Builder {
         this.writer.view.buffer.resize(this.writer.position + bodySize);
         serializer.serializeInto(this.writer, values);
         this.writer.view.setUint32(4, bodyStart - this.writer.position, true);
-
-        this.writer.view.setUint32(8, serial, true);
 
         return this.writer.cloneData();
     }
