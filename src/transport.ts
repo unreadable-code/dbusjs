@@ -1,5 +1,10 @@
 import {createConnection, type Socket} from "net";
 
+import {DataType} from ".";
+import {IntrospectionResult} from "./introspection";
+import {Builder as MessageBuilder, Header, Kind as MessageKind, Reader} from "./message";
+import {emptySerializer} from "./serialization";
+
 export interface UnixDomainAddress {
     transport: "unix";
     guid?: string;
@@ -73,9 +78,13 @@ export const enum AuthMethod {
     Anonymous = "ANONYMOUS",
 }
 
+const serialOffset = 8;
+const messageBodySizeOffset = 4
+const headerFieldsSizeOffset = 12;
+
 export class Connection {
     private nextCallID = 1;
-    private responseHandlers = new Map<number, (data: Uint8Array) => void>();
+    private responseHandlers = new Map<number, (data: Reader) => void>();
 
     // The parts of a multi-part message
     private receivedParts: Uint8Array[] = [];
@@ -92,6 +101,8 @@ export class Connection {
     }
 
     private async onData(data: Uint8Array): Promise<void> {
+        let view: DataView;
+
         if (this.receiveDue) {
             this.receivedParts.push(data);
 
@@ -100,44 +111,46 @@ export class Connection {
                 this.receiveDue -= data.byteLength;
                 return;
             } else {
-                data = Buffer.concat(this.receivedParts);
+                view = new DataView(Buffer.concat(this.receivedParts).buffer);
                 this.receiveDue = 0;
             }
+        } else {
+            view = new DataView(data.buffer);
         }
 
         // The data received might be multiple messages concatenated
         do {
-            const view = new DataView(data.buffer);
-            const messageLength = view.getUint32(4, true);
+            const bodySize = view.getUint32(messageBodySizeOffset, true);
+            const headerFieldsSize = view.getUint32(headerFieldsSizeOffset, true);
+            const messageSize = Math.trunc(1 + (16 + headerFieldsSize) / 8) * 8 + bodySize;
 
             // Handle incomplete message
-            if (messageLength > data.byteLength) {
-                this.receiveDue = messageLength - data.byteLength;
-                this.receivedParts = [data];
+            if (messageSize > view.byteLength) {
+                this.receiveDue = messageSize - view.byteLength;
+                this.receivedParts = [new Uint8Array(view.buffer.slice(view.byteOffset))];
                 return;
             }
 
-            const messageID = view.getUint32(8, true);
+            const messageID = view.getUint32(serialOffset, true);
             const handler = this.responseHandlers.get(messageID);
             if (handler) {
                 // Handle a call response
-                handler(data.subarray(8));
+                handler(new Reader(new DataView(view.buffer, view.byteOffset, messageSize)));
                 this.responseHandlers.delete(messageID);
             }
 
-            data = data.subarray(messageLength);
-        } while (data.byteLength);
+            view = new DataView(view.buffer, view.byteOffset + messageSize);
+        } while (view.byteLength);
     }
 
-    sendAndReceive(payload: Uint8Array): Promise<Uint8Array> {
+    sendAndReceive(value: ArrayBuffer): Promise<Reader> {
         const callID = this.nextCallID;
         this.nextCallID = callID > (1 << 31) ? 1 : callID + 2;
-        const view = new DataView(payload.buffer);
-        view.setUint32(8, callID);
+        new DataView(value).setUint32(serialOffset, callID, true);
         return new Promise((resolve) => {
             // TODO: Implement timeouts
             this.responseHandlers.set(callID, resolve);
-            this.socket.write(payload);
+            this.socket.write(new Uint8Array(value));
         });
     }
 
@@ -177,4 +190,40 @@ export class Connection {
             });
         });
     }
+}
+
+const introspectionMessageBuilder = new MessageBuilder(MessageKind.Call);
+introspectionMessageBuilder.setHeader(Header.Interface, DataType.String, "org.freedesktop.DBus.Introspectable");
+introspectionMessageBuilder.setHeader(Header.Member, DataType.String, "Introspect");
+
+export class Bus {
+    constructor(private readonly connection: Connection) {
+        // do nothing
+    }
+
+    async introspect(path: string, service: string): Promise<IntrospectionResult> {
+        introspectionMessageBuilder.setHeader(Header.Destination, DataType.String, service);
+        introspectionMessageBuilder.setHeader(Header.Path, DataType.ObjectPath, path);
+        const message = introspectionMessageBuilder.build(emptySerializer, []);
+        console.log(message);
+        const reader = await this.connection.sendAndReceive(message);
+        for (const limit = reader.getHeaderFieldsSize(); reader.position < limit;) {
+            const [id,, value] = reader.readHeaderField();
+            if (id === Header.Signature && value !== "s")
+                throw new Error("Response type invalid");
+        }
+
+        reader.skipToBody();
+        const data = reader.readString();
+        return IntrospectionResult.parse(data);
+    }
+}
+
+export function sessionBus(): Promise<Bus> {
+    const addressVar = process.env["DBUS_SESSION_BUS_ADDRESS"];
+    if (!addressVar)
+        throw new Error("DBus session address environment variable is unset");
+
+    const address = parseAddress(addressVar);
+    return Connection.open(address).then(v => new Bus(v));
 }

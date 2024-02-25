@@ -1,4 +1,22 @@
-import {DataType} from ".";
+export enum DataType {
+    String = "s",
+    Boolean = "b",
+    ObjectPath = "o",
+    Variant = "v",
+
+    Byte = "y",
+
+    Unsigned16 = "q",
+    Unsigned32 = "u",
+    Unsigned64 = "t",
+
+    Int16 = "n",
+    Int32 = "i",
+    Int64 = "x",
+
+    TypeSignature = "g",
+    Double = "d",
+}
 
 export class SerializationError extends Error {
     constructor(
@@ -180,7 +198,7 @@ class StructSerializer implements Serializer {
     signature: string;
 
     constructor(protected readonly fields: Serializer[]) {
-        this.alignment = fields[0].alignment;
+        this.alignment = fields[0] ? fields[0].alignment : 1;
         this.signature = fields.map(f => f.signature).join();
     }
 
