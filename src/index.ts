@@ -1,23 +1,3 @@
-export const enum DataType {
-    String = "s",
-    Boolean = "b",
-    ObjectPath = "o",
-    Variant = "v",
-
-    Byte = "y",
-
-    Unsigned16 = "q",
-    Unsigned32 = "u",
-    Unsigned64 = "t",
-
-    Int16 = "n",
-    Int32 = "i",
-    Int64 = "x",
-
-    TypeSignature = "g",
-    Double = "d",
-}
-
 export class XMLError extends Error {
     constructor(readonly document: XMLDocument, message: string) {
         super(message);
@@ -39,6 +19,7 @@ export {
 } from "./message";
 
 export {
+    DataType,
     SerializationError,
     parseSignature,
 } from "./serialization";
@@ -50,4 +31,5 @@ export {
     type UnixDomainPathAddress,
     type UnixDomainSocketAddress,
     parseAddress,
+    sessionBus,
 } from "./transport";

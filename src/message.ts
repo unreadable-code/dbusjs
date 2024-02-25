@@ -101,3 +101,89 @@ export class Builder {
         return this.writer.cloneData();
     }
 }
+
+const utf8Decoder = new TextDecoder("utf8");
+
+export class Reader {
+    private offset: number = 16;
+
+    constructor(readonly view: DataView) {
+        // do nothing
+    }
+
+    get position(): number {
+        return this.offset;
+    }
+
+    getHeaderFieldsSize(): number {
+        return this.view.getUint32(12, true);
+    }
+
+    getBodySize(): number {
+        return this.view.getUint32(4, true);
+    }
+
+    getSerial(): number {
+        return this.view.getUint32(8, true);
+    }
+
+    readUint8(): number {
+        const result = this.view.getUint8(this.offset);
+        ++this.offset;
+        return result;
+    }
+
+    readUint16(): number {
+        const result = this.view.getUint16(this.offset, true);
+        this.offset += 2;
+        return result;
+    }
+
+    readUint32(): number {
+        const result = this.view.getUint32(this.offset, true);
+        this.offset += 4;
+        return result;
+    }
+
+    readUint64(): bigint {
+        const result = this.view.getBigUint64(this.offset, true);
+        this.offset += 8;
+        return result;
+    }
+
+    decodeString(length: number): string {
+        const offset = this.view.byteOffset + this.offset;
+        return utf8Decoder.decode(new Uint8Array(this.view.buffer, offset, length));
+    }
+
+    readString(): string {
+        return this.decodeString(this.readUint32());
+    }
+
+    readSignature(): string {
+        return this.decodeString(this.readUint8());
+    }
+
+    readHeaderField(): [id: number, type: DataType, value: ScalarValue] {
+        const id = this.readUint8();
+        const type = this.readSignature();
+        switch (type) {
+        case DataType.String:
+        case DataType.ObjectPath:
+            return [id, type, this.readString()];
+
+        case DataType.Unsigned32:
+            return [id, type, this.readUint32()];
+
+        case DataType.TypeSignature:
+            return [id, type, this.readSignature()];
+        }
+
+        throw new Error("Unrecognized header data");
+    }
+
+    skipToBody(): void {
+        const p = 16 + this.getHeaderFieldsSize();
+        this.offset = 8 + Math.floor(p / 8);
+    }
+}
