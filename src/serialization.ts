@@ -129,6 +129,8 @@ export type Value = ScalarValue | Uint8Array | ReadonlyArray<Value>;
 
 export interface Serializer {
     readonly alignment: number;
+    readonly signature: string;
+
     estimateBytesLength(value: Value): number;
     serializeInto(writer: Writer, value: Value): void;
 }
@@ -143,6 +145,7 @@ class PrimitiveSerializer implements Serializer {
     readonly alignment: number;
 
     constructor(
+        readonly signature: string,
         bytes: number,
         method: typeof Writer.prototype[keyof typeof Writer.prototype],
     ) {
@@ -159,24 +162,26 @@ class PrimitiveSerializer implements Serializer {
     }
 
     static instances: {[K in DataType[number]]: PrimitiveSerializer} = {
-        [DataType.Byte]: new PrimitiveSerializer(1, Writer.prototype.writeByte),
-        [DataType.Boolean]: new PrimitiveSerializer(4, Writer.prototype.writeBool),
-        [DataType.Int16]: new PrimitiveSerializer(2, Writer.prototype.writeInt16),
-        [DataType.Int32]: new PrimitiveSerializer(4, Writer.prototype.writeInt32),
-        [DataType.Int64]: new PrimitiveSerializer(8, Writer.prototype.writeInt64),
-        [DataType.Unsigned16]: new PrimitiveSerializer(2, Writer.prototype.writeUInt16),
-        [DataType.Unsigned32]: new PrimitiveSerializer(4, Writer.prototype.writeUInt32),
-        [DataType.Unsigned64]: new PrimitiveSerializer(8, Writer.prototype.writeUInt64),
-        [DataType.Double]: new PrimitiveSerializer(8, Writer.prototype.writeDouble),
+        [DataType.Byte]: new PrimitiveSerializer(DataType.Byte, 1, Writer.prototype.writeByte),
+        [DataType.Boolean]: new PrimitiveSerializer(DataType.Boolean, 4, Writer.prototype.writeBool),
+        [DataType.Int16]: new PrimitiveSerializer(DataType.Int16, 2, Writer.prototype.writeInt16),
+        [DataType.Int32]: new PrimitiveSerializer(DataType.Int32, 4, Writer.prototype.writeInt32),
+        [DataType.Int64]: new PrimitiveSerializer(DataType.Int64, 8, Writer.prototype.writeInt64),
+        [DataType.Unsigned16]: new PrimitiveSerializer(DataType.Unsigned16, 2, Writer.prototype.writeUInt16),
+        [DataType.Unsigned32]: new PrimitiveSerializer(DataType.Unsigned32, 4, Writer.prototype.writeUInt32),
+        [DataType.Unsigned64]: new PrimitiveSerializer(DataType.Unsigned64, 8, Writer.prototype.writeUInt64),
+        [DataType.Double]: new PrimitiveSerializer(DataType.Double, 8, Writer.prototype.writeDouble),
         // TODO: "h": new PrimitiveSerializer(4, Writer.prototype.writeUInt32),
     };
 }
 
 class StructSerializer implements Serializer {
     alignment: number;
+    signature: string;
 
     constructor(protected readonly fields: Serializer[]) {
         this.alignment = fields[0].alignment;
+        this.signature = fields.map(f => f.signature).join();
     }
 
     estimateBytesLength(value: Value): number {
@@ -198,6 +203,11 @@ class StructSerializer implements Serializer {
 }
 
 class ArraySerializer extends StructSerializer {
+    constructor(fields: Serializer[]) {
+        super(fields);
+        this.signature = `a(${this.signature})`;
+    }
+
     estimateBytesLength(value: Value): number {
         const values = value as ReadonlyArray<Value>;
 
@@ -233,6 +243,10 @@ ArraySerializer.prototype.alignment = 4;
 class StringSerializer implements Serializer {
     alignment!: number;
 
+    constructor(readonly signature: string) {
+        // do nothing
+    }
+
     estimateBytesLength(value: Value): number {
         return 5 + (value as string).length;
     }
@@ -240,14 +254,13 @@ class StringSerializer implements Serializer {
     serializeInto(writer: Writer, value: Value): void {
         writer.writeString(value as string)
     }
-
-    static readonly instance = new StringSerializer();
 }
 
 StringSerializer.prototype.alignment = 4;
 
 class SignatureSerializer implements Serializer {
     alignment!: number;
+    signature!: string;
 
     estimateBytesLength(value: Value): number {
         return 2 + (value as string).length;
@@ -259,9 +272,11 @@ class SignatureSerializer implements Serializer {
 }
 
 SignatureSerializer.prototype.alignment = 1;
+SignatureSerializer.prototype.signature = DataType.TypeSignature;
 
+export const stringSerializer = new StringSerializer(DataType.String);
+export const pathSerializer = new StringSerializer(DataType.ObjectPath);
 export const signatureSerializer = new SignatureSerializer();
-
 export const emptySerializer = new StructSerializer([]);
 
 const enum CompositeKind {
@@ -293,8 +308,10 @@ export function getValueSerializer(code: string): Serializer | null;
 export function getValueSerializer(code: DataType | string): Serializer | null {
     switch (code) {
     case "s":
+        return stringSerializer;
+
     case "o":
-        return StringSerializer.instance;
+        return pathSerializer;
 
     case "g":
         return signatureSerializer;
