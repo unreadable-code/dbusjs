@@ -2,6 +2,8 @@ export const enum DataType {
     String = "s",
     Boolean = "b",
     ObjectPath = "o",
+    Variant = "v",
+
     Byte = "y",
 
     Unsigned16 = "q",
@@ -22,25 +24,6 @@ export class XMLError extends Error {
     }
 }
 
-export enum MessageType {
-    Invalid = 0,
-    MethodCall,
-    MethodReturn,
-    Error,
-    Signal,
-}
-
-export interface Headers {
-    destination?: string;
-    path?: string;
-    interface?: string;
-    member?: string;
-    replySerial?: number;
-    errorName?: string;
-    sender?: string;
-    signature?: string;
-}
-
 export {
     type InterfaceSpecification,
     type IntrospectionResult,
@@ -48,6 +31,12 @@ export {
     type SignalSpecification,
     type ValueSpecification,
 } from "./introspection";
+
+export {
+    Builder as MessageBuilder,
+    type Headers,
+    Kind,
+} from "./message";
 
 export {
     SerializationError,

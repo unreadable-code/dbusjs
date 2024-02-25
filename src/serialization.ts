@@ -1,4 +1,4 @@
-import {DataType, MessageType, type Headers} from ".";
+import {DataType} from ".";
 
 export class SerializationError extends Error {
     constructor(
@@ -10,9 +10,9 @@ export class SerializationError extends Error {
     }
 }
 
-class Writer {
+export class Writer {
     private offset: number = 0;
-    private readonly view: DataView;
+    readonly view: DataView;
 
     constructor(buffer: ArrayBuffer) {
         this.view = new DataView(buffer);
@@ -22,34 +22,43 @@ class Writer {
         return this.offset;
     }
 
-    pad(length: number): void {
-        length -= this.offset % length;
-        new Uint8Array(this.view.buffer, this.offset, length);
-        this.offset += length;
+    pad(size: number): number {
+        size -= this.offset % size;
+        return this.offset += size;
+    }
+
+    seek(offset: number): void {
+        this.offset = offset;
     }
 
     private encodeString(value: string): number {
-        const allocated = value.length;
+        const allocated = value.length + 1;
         const strview = new Uint8Array(this.view.buffer, this.offset, allocated);
         const progress = new TextEncoder().encodeInto(value, strview);
         if (progress.read < value.length) {
             // TODO: handle resizing
         }
 
+        strview[allocated - 1] = 0;
         return allocated;
     }
 
     writeString(value: string): void {
-        this.pad(4);
-        this.view.setUint32(this.offset, value.length, true);
-        this.offset += 5 + this.encodeString(value);
-        this.view.setUint8(this.offset - 1, 0);
+        const start = this.pad(4);
+        this.offset += 4;
+
+        const written = this.encodeString(value);
+        this.offset += written;
+        this.view.setUint32(start, written - 1, true);
     }
 
     writeSignature(value: string): void {
-        this.view.setUint8(this.offset, value.length);
-        this.offset += 2 + this.encodeString(value);
-        this.view.setUint8(this.offset - 1, 0);
+        const start = this.offset;
+        ++this.offset;
+
+        const written = this.encodeString(value);
+        this.offset += written;
+        this.view.setUint8(start, written - 1);
     }
 
     writeByte(value: number): void {
@@ -81,13 +90,6 @@ class Writer {
         this.offset += 4;
     }
 
-    deferUInt32(): (value: number) => void {
-        this.pad(4);
-        const position = this.offset;
-        this.offset += 4;
-        return value => this.view.setUint32(position, value, true);
-    }
-
     writeUInt32(value: number): void {
         this.pad(4);
         this.view.setUint32(this.offset, value, true);
@@ -116,11 +118,17 @@ class Writer {
         new Uint8Array(this.view.buffer).set(value, this.offset);
         this.offset += value.length;
     }
+
+    cloneData(): ArrayBuffer {
+        return this.view.buffer.slice(0, this.offset);
+    }
 }
 
-type Value = number | string | boolean | bigint | Uint8Array | ReadonlyArray<Value>;
+export type ScalarValue = number | string | boolean | bigint;
+export type Value = ScalarValue | Uint8Array | ReadonlyArray<Value>;
 
-interface Serializer {
+export interface Serializer {
+    readonly alignment: number;
     estimateBytesLength(value: Value): number;
     serializeInto(writer: Writer, value: Value): void;
 }
@@ -129,19 +137,21 @@ interface WriterMethodErasure {
     (value: Value): void;
 }
 
-
 class PrimitiveSerializer implements Serializer {
     private readonly method: (this: Writer, value: Value) => void;
 
+    readonly alignment: number;
+
     constructor(
-        private readonly bytes: number,
+        bytes: number,
         method: typeof Writer.prototype[keyof typeof Writer.prototype],
     ) {
+        this.alignment = bytes;
         this.method = method as WriterMethodErasure;
     }
 
     estimateBytesLength(): number {
-        return this.bytes;
+        return this.alignment;
     }
 
     serializeInto(writer: Writer, value: Value): void {
@@ -163,8 +173,10 @@ class PrimitiveSerializer implements Serializer {
 }
 
 class StructSerializer implements Serializer {
+    alignment: number;
+
     constructor(protected readonly fields: Serializer[]) {
-        // do nothing
+        this.alignment = fields[0].alignment;
     }
 
     estimateBytesLength(value: Value): number {
@@ -183,7 +195,6 @@ class StructSerializer implements Serializer {
         for (let n = 0; n < this.fields.length; ++n)
             this.fields[n].serializeInto(writer, values[n]);
     }
-
 }
 
 class ArraySerializer extends StructSerializer {
@@ -200,17 +211,28 @@ class ArraySerializer extends StructSerializer {
     serializeInto(writer: Writer, value: Value): void {
         const values = value as ReadonlyArray<Value>;
 
+        const sizeFieldPosition = writer.pad(4);
+
+        // dbus specification says even 0 length arrays include element padding
+        // and that its size field don't include said padding
+        const elementsPosition = writer.pad(this.fields[0].alignment);
+
         const count = values.length;
-        const startingPosition = writer.position;
-        const deferred = writer.deferUInt32();
         for (let n = 0; n < count; ++n)
             super.serializeInto(writer, values[n]);
 
-        deferred(writer.position - startingPosition - 4);
+        const endPosition = writer.position;
+        writer.seek(sizeFieldPosition);
+        writer.writeUInt32(endPosition - elementsPosition - 4);
+        writer.seek(endPosition);
     }
 }
 
+ArraySerializer.prototype.alignment = 4;
+
 class StringSerializer implements Serializer {
+    alignment!: number;
+
     estimateBytesLength(value: Value): number {
         return 5 + (value as string).length;
     }
@@ -222,7 +244,11 @@ class StringSerializer implements Serializer {
     static readonly instance = new StringSerializer();
 }
 
+StringSerializer.prototype.alignment = 4;
+
 class SignatureSerializer implements Serializer {
+    alignment!: number;
+
     estimateBytesLength(value: Value): number {
         return 2 + (value as string).length;
     }
@@ -230,21 +256,11 @@ class SignatureSerializer implements Serializer {
     serializeInto(writer: Writer, value: Value): void {
         writer.writeSignature(value as string)
     }
-
-    static readonly instance = new SignatureSerializer();
 }
 
-class PassthroughSerializer implements Serializer {
-    estimateBytesLength(value: Value): number {
-        return (value as Uint8Array).length;
-    }
+SignatureSerializer.prototype.alignment = 1;
 
-    serializeInto(writer: Writer, value: Value): void {
-        writer.append(value as Uint8Array);
-    }
-
-    static readonly instance = new PassthroughSerializer();
-}
+export const signatureSerializer = new SignatureSerializer();
 
 export const emptySerializer = new StructSerializer([]);
 
@@ -269,6 +285,31 @@ class CompositeSerializerBuilder {
     }
 }
 
+/**
+ * Get a serializer for a non-composite value
+ */
+export function getValueSerializer(code: DataType): Serializer;
+export function getValueSerializer(code: string): Serializer | null;
+export function getValueSerializer(code: DataType | string): Serializer | null {
+    switch (code) {
+    case "s":
+    case "o":
+        return StringSerializer.instance;
+
+    case "g":
+        return signatureSerializer;
+
+    case "v":
+        // TODO
+    }
+
+    const candidate = PrimitiveSerializer.instances[code];
+    if (candidate)
+        return candidate;
+    
+    return null;
+}
+
 class SerializerBuilder {
     readonly incomplete: CompositeSerializerBuilder[];
     current: CompositeSerializerBuilder;
@@ -280,16 +321,6 @@ class SerializerBuilder {
 
     add(serializer: Serializer): void {
         this.current.elements.push(serializer);
-    }
-
-    addPrimitive(token: string): boolean {
-        const candidate = PrimitiveSerializer.instances[token];
-        if (candidate) {
-            this.current.elements.push(candidate);
-            return true;
-        }
-
-        return false;
     }
 
     beginComposite(kind: CompositeKind): void {
@@ -321,8 +352,7 @@ class SerializerBuilder {
 export function parseSignature(signature: string): StructSerializer {
     const builder = new SerializerBuilder();
 
-    let index = 0;
-    while (index < signature.length) {
+    for (let index = 0; index < signature.length; ++index) {
         const token = signature[index];
 
         switch (token) {
@@ -330,119 +360,21 @@ export function parseSignature(signature: string): StructSerializer {
         case CompositeKind.Dictionary:
         case CompositeKind.Struct:
             builder.beginComposite(token);
-            break;
+            continue;
 
         case "}":
             builder.endComposite(CompositeKind.Dictionary, signature);
-            break;
+            continue;
 
         case ")":
             builder.endComposite(CompositeKind.Struct, signature);
-            break;
-
-        case "o":
-            // TODO: add validation
-        case "s":
-            builder.add(StringSerializer.instance);
-            break;
-
-        case "g":
-            builder.add(SignatureSerializer.instance);
-            break;
-
-        case "v":
-            builder.add(PassthroughSerializer.instance);
-            break;
-
-        default:
-            if (!builder.addPrimitive(token))
-                throw new Error(`Unrecognized token "${token}" in DBus signature: ${signature}`);
+            continue;
         }
 
-        ++index;
+        const candidate = getValueSerializer(token);
+        if (!candidate)
+            throw new Error(`Unrecognized token "${token}" in DBus signature: ${signature}`);
     }
 
     return builder.build(signature);
-}
-
-interface FieldDefinition {
-    id: number,
-    type: DataType,
-}
-
-const headerDefinitions: Record<string, FieldDefinition> = {
-    "path": {
-        id: 1,
-        type: DataType.ObjectPath,
-    },
-    "interface": {
-        id: 2,
-        type: DataType.String,
-    },
-    "member": {
-        id: 3,
-        type: DataType.String,
-    },
-    "errorName": {
-        id: 4,
-        type: DataType.String,
-    },
-    "replySerial": {
-        id: 5,
-        type: DataType.Unsigned32,
-    },
-    "destination": {
-        id: 6,
-        type: DataType.String,
-    },
-    "sender": {
-        id: 7,
-        type: DataType.String,
-    },
-    "signature": {
-        id: 8,
-        type: DataType.TypeSignature,
-    },
-};
-
-export function serializeMessage(
-    serial: number,
-    headers: Headers,
-    serializer: Serializer,
-    values: ReadonlyArray<Value>,
-): Uint8Array {
-    const headerSerializers = [];
-    const headerValues: Value[] = [];
-    for (const propertyName of Object.keys(headers)) {
-        const definition = headerDefinitions[propertyName];
-        if (definition) {
-            headerSerializers.push(PrimitiveSerializer.instances[definition.type]);
-            headerValues.push(headers[propertyName as keyof Headers]!);
-        }
-    }
-
-    const headerSerializer = new StructSerializer(headerSerializers);
-    const headerSize = headerSerializer.estimateBytesLength(headerValues);
-    const bodySize = serializer.estimateBytesLength(values);
-
-    const paddedHeaderSize = 12 + 8 * Math.trunc(1 + headerSize / 8);
-    const buffer = new ArrayBuffer(paddedHeaderSize + bodySize);
-    const writer = new Writer(buffer);
-
-    // serialize the static part header (12 bytes)
-    writer.writeByte(108); // little endian
-    writer.writeByte(MessageType.MethodCall);
-    writer.writeByte(0);
-    writer.writeByte(1); // protocol version 1
-    writer.writeUInt32(paddedHeaderSize);
-    writer.writeUInt32(serial);
-
-    // serialize the variable part of the header
-    headerSerializer.serializeInto(writer, headerValues);
-    writer.pad(8);
-
-    // serialize the arguments
-    serializer.serializeInto(writer, values);
-
-    return new Uint8Array(buffer);
 }
