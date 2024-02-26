@@ -172,7 +172,7 @@ class PrimitiveSerializer implements Serializer {
     }
 
     estimateBytesLength(): number {
-        return this.alignment;
+        return this.alignment * 2 - 1;
     }
 
     serializeInto(writer: Writer, value: Value): void {
@@ -229,7 +229,7 @@ class ArraySerializer extends StructSerializer {
     estimateBytesLength(value: Value): number {
         const values = value as ReadonlyArray<Value>;
 
-        let result = 0;
+        let result = 4 * 2 - 1;
         for (let n = 0; n < values.length; ++n)
             result += super.estimateBytesLength(values[n]);
 
@@ -266,7 +266,7 @@ class StringSerializer implements Serializer {
     }
 
     estimateBytesLength(value: Value): number {
-        return 5 + (value as string).length;
+        return 1 + (4 * 2 - 1) + (value as string).length;
     }
 
     serializeInto(writer: Writer, value: Value): void {
