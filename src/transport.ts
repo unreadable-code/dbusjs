@@ -35,25 +35,24 @@ function requireIndex(value: string, token: string, offset: number, error: strin
 }
 
 export function parseAddress(value: string): Address {
-    let index = requireIndex(value, ":", 0, "Invalid dbus address, no transport indicator");
-    const transport = value.slice(0, index);
+    let delimiterIndex = requireIndex(value, ":", 0, "Invalid dbus address, no transport indicator");
+    const transport = value.slice(0, delimiterIndex);
     const params: Record<string, string> = {};
-    while (index < value.length) {
-        const valueIndex = 1 + requireIndex(value, "=", index, "Invalid dbus address part, missing equal sign");
-        const paramName = value.slice(index, valueIndex);
-        const delimiterIndex = value.indexOf(",", index);
+    while (delimiterIndex < value.length) {
+        const valueIndex = 1 + requireIndex(value, "=", delimiterIndex, "Invalid dbus address part, missing equal sign");
+        ++delimiterIndex;
+        const paramName = value.slice(delimiterIndex, valueIndex - 1);
+        delimiterIndex = value.indexOf(",", delimiterIndex);
         if (delimiterIndex < 0) {
             params[paramName] = value.slice(valueIndex);
             break;
         } else {
             params[paramName] = value.slice(valueIndex, delimiterIndex);
-            index = delimiterIndex;
         }
     }
 
-    switch (transport) {
+    switch (params.transport = transport) {
     case "unix":
-        params.transport = transport;
         if (!params.path && !params.abstract)
             throw new Error("Invalid unix domain address, missing path");
 
@@ -100,7 +99,7 @@ export class Connection {
         this.socket.end();
     }
 
-    private async onData(data: Uint8Array): Promise<void> {
+    private onData(data: Uint8Array): void {
         let view: DataView;
 
         if (this.receiveDue) {
@@ -154,26 +153,61 @@ export class Connection {
         });
     }
 
-    private static tryExternalAuth(socket: Socket, id: string) {
+    private static tryExternalAuth(socket: Socket) {
+        const uid = process.getuid && process.getuid();
+        const id = Buffer.from(uid!.toString(), "ascii").toString("hex");
         socket.write(`AUTH EXTERNAL ${id}\r\n`);
     }
 
-    private static tryAuth(socket: Socket, methods: string[]): void {
-        const uid = process.getuid && process.getuid();
-        const id = Buffer.from(uid!.toString(), "ascii").toString("hex");
+    private static textDecoder = new TextDecoder("utf8");
+    private static textDecodeOptions = {stream: true};
 
-        for (const method of methods) {
+    private static handshake(
+        socket: Socket,
+        methods: string[],
+        resolve: (c: Connection) => void,
+        reject: (e: Error) => void,
+    ): void {
+        socket.write("\0");
+
+        function proposeAuth(socket: Socket, method: string): void {
             switch (method) {
             case AuthMethod.External:
-                Connection.tryExternalAuth(socket, id);
+                Connection.tryExternalAuth(socket);
                 break;
+
             case AuthMethod.Anonymous:
                 socket.write("AUTH ANONYMOUS \r\n");
                 break;
+
             default:
-                throw new Error(`Unsupported dbus auth method ${method}`);
+                socket.off("data", onHandshakeData);
+                reject(new Error(`Unsupported dbus auth method ${method}`));
             }
         }
+
+        let nextMethod = 0;
+        let bufferedText = "";
+        function onHandshakeData(data: Uint8Array): void {
+            bufferedText += Connection.textDecoder.decode(data, Connection.textDecodeOptions);
+            const delimiterIndex = bufferedText.indexOf("\r\n");
+            if (delimiterIndex > -1) {
+                if (bufferedText.startsWith("OK ")) {
+                    socket.off("data", onHandshakeData);
+                    socket.write("BEGIN\r\n", () => resolve(new Connection(socket)));
+                } else if (nextMethod === methods.length) {
+                    socket.off("data", onHandshakeData);
+                    reject(new Error("No auth methods can be used"));
+                } else {
+                    proposeAuth(socket, methods[++nextMethod]);
+                }
+
+                bufferedText = bufferedText.slice(delimiterIndex + 2);
+            }
+        }
+
+        socket.on("data", onHandshakeData);
+        proposeAuth(socket, methods[0]);
     }
 
     static open(address: Address): Promise<Connection> {
@@ -181,12 +215,8 @@ export class Connection {
             const socket = createSocket(address);
             socket.once("error", reject);
             socket.once("connect", () => {
-                socket.write(new Uint8Array(1));
-                Connection.tryAuth(socket, ["EXTERNAL", "ANONYMOUS"]);
-
+                Connection.handshake(socket, ["EXTERNAL", "ANONYMOUS"], resolve, reject);
                 socket.removeListener("error", reject);
-                const connection = new Connection(socket);
-                resolve(connection);
             });
         });
     }
@@ -205,7 +235,6 @@ export class Bus {
         introspectionMessageBuilder.setHeader(Header.Destination, DataType.String, service);
         introspectionMessageBuilder.setHeader(Header.Path, DataType.ObjectPath, path);
         const message = introspectionMessageBuilder.build(emptySerializer, []);
-        console.log(message);
         const reader = await this.connection.sendAndReceive(message);
         for (const limit = reader.getHeaderFieldsSize(); reader.position < limit;) {
             const [id,, value] = reader.readHeaderField();
