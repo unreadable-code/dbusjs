@@ -296,10 +296,10 @@ class SignatureSerializer implements Serializer {
 SignatureSerializer.prototype.alignment = 1;
 SignatureSerializer.prototype.signature = DataType.TypeSignature;
 
-export const stringSerializer = new StringSerializer(DataType.String);
-export const pathSerializer = new StringSerializer(DataType.ObjectPath);
-export const signatureSerializer = new SignatureSerializer();
-export const emptySerializer = new StructSerializer([]);
+export const stringSerializer: Serializer = new StringSerializer(DataType.String);
+export const pathSerializer: Serializer = new StringSerializer(DataType.ObjectPath);
+export const signatureSerializer: Serializer = new SignatureSerializer();
+export const emptySerializer: Serializer = new StructSerializer([]);
 
 /**
  * Get a serializer for a non-composite value
