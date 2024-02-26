@@ -301,27 +301,6 @@ export const pathSerializer = new StringSerializer(DataType.ObjectPath);
 export const signatureSerializer = new SignatureSerializer();
 export const emptySerializer = new StructSerializer([]);
 
-const enum CompositeKind {
-    Array = "a",
-    Struct = "(",
-    Dictionary = "{",
-}
-
-class CompositeSerializerBuilder {
-    readonly elements: Serializer[] = [];
-
-    constructor(readonly kind: CompositeKind) {
-        // do nothing
-    }
-
-    build(signature: string): StructSerializer {
-        if (this.elements.length < 1)
-            throw new Error(`Empty composite type in dbus signature: ${signature}`);
-
-        return new StructSerializer(this.elements);
-    }
-}
-
 /**
  * Get a serializer for a non-composite value
  */
@@ -349,40 +328,66 @@ export function getValueSerializer(code: DataType | string): Serializer | null {
     return null;
 }
 
+const enum CompositeKind {
+    Array = "a",
+    Struct = "(",
+    Dictionary = "{",
+}
+
+interface CompositeSerializerParts {
+    readonly kind?: CompositeKind;
+    readonly elements: Serializer[];
+}
+
 class SerializerBuilder {
-    readonly incomplete: CompositeSerializerBuilder[];
-    current: CompositeSerializerBuilder;
+    private readonly incomplete: CompositeSerializerParts[];
+    private current: CompositeSerializerParts;
 
     constructor() {
-        this.current = new CompositeSerializerBuilder(CompositeKind.Struct);
-        this.incomplete = [this.current];
+        this.current = { elements: [] };
+        this.incomplete = [];
     }
 
     add(serializer: Serializer): void {
+        while (this.current.kind === CompositeKind.Array) {
+            serializer = new ArraySerializer(serializer);
+            this.current = this.incomplete.pop()!;
+        }
+
         this.current.elements.push(serializer);
     }
 
     beginComposite(kind: CompositeKind): void {
-        this.current = new CompositeSerializerBuilder(kind);
         this.incomplete.push(this.current);
+        this.current = { kind, elements: [] };
     }
 
     endComposite(kind: CompositeKind, signature: string): void {
         if (this.current.kind !== kind)
             throw new Error(`Composite type mismatch in DBus signature: ${signature}`);
 
-        do {
-            const s = this.current.build(signature);
-            this.current = this.incomplete.pop()!;
-            this.current.elements.push(s);
-        } while (this.current.kind === CompositeKind.Array);
+        const {elements} = this.current;
+        if (elements.length < 1)
+            throw new Error(`Empty composite type in dbus signature: ${signature}`);
+
+        this.current = this.incomplete.pop()!;
+
+        switch (kind) {
+        case CompositeKind.Dictionary:
+            // TODO
+            break;
+
+        case CompositeKind.Struct:
+            this.add(new StructSerializer(elements));
+            break;
+        }
     }
 
     build(signature: string): StructSerializer {
         if (this.incomplete.length > 1)
             throw new Error(`Incomplete DBus signature: ${signature}`);
 
-        return this.current.build(signature);
+        return new StructSerializer(this.current.elements);
     }
 }
 
