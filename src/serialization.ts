@@ -194,18 +194,17 @@ class PrimitiveSerializer implements Serializer {
 }
 
 class StructSerializer implements Serializer {
-    alignment: number;
+    alignment!: number;
     signature: string;
 
-    constructor(protected readonly fields: Serializer[]) {
-        this.alignment = fields[0] ? fields[0].alignment : 1;
-        this.signature = fields.map(f => f.signature).join();
+    constructor(private readonly fields: Serializer[]) {
+        this.signature = `(${fields.map(f => f.signature).join()})`;
     }
 
     estimateBytesLength(value: Value): number {
         const values = value as ReadonlyArray<Value>;
 
-        let result = 0;
+        let result = 7;
         for (let n = 0; n < this.fields.length; ++n)
             result += this.fields[n].estimateBytesLength(values[n]);
 
@@ -213,17 +212,22 @@ class StructSerializer implements Serializer {
     }
 
     serializeInto(writer: Writer, value: Value): void {
-        const values = value as ReadonlyArray<Value>;
+        writer.pad(8);
 
+        const values = value as ReadonlyArray<Value>;
         for (let n = 0; n < this.fields.length; ++n)
             this.fields[n].serializeInto(writer, values[n]);
     }
 }
 
-class ArraySerializer extends StructSerializer {
-    constructor(fields: Serializer[]) {
-        super(fields);
-        this.signature = `a(${this.signature})`;
+StructSerializer.prototype.alignment = 8;
+
+class ArraySerializer implements Serializer {
+    alignment!: number;
+    signature: string;
+
+    constructor(private readonly element: Serializer) {
+        this.signature = `a${element.signature}`;
     }
 
     estimateBytesLength(value: Value): number {
@@ -231,7 +235,7 @@ class ArraySerializer extends StructSerializer {
 
         let result = 4 * 2 - 1;
         for (let n = 0; n < values.length; ++n)
-            result += super.estimateBytesLength(values[n]);
+            result += this.element.estimateBytesLength(values[n]);
 
         return result;
     }
@@ -243,11 +247,11 @@ class ArraySerializer extends StructSerializer {
 
         // dbus specification says even 0 length arrays include element padding
         // and that its size field don't include said padding
-        const elementsPosition = writer.pad(this.fields[0].alignment);
+        const elementsPosition = writer.pad(this.element.alignment);
 
         const count = values.length;
         for (let n = 0; n < count; ++n)
-            super.serializeInto(writer, values[n]);
+            this.element.serializeInto(writer, values[n]);
 
         const endPosition = writer.position;
         writer.seek(sizeFieldPosition);
