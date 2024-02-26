@@ -48,7 +48,7 @@ export class Builder {
     private readonly headers: HeaderValue[] = [];
 
     constructor(kind: Kind) {
-        this.writer = new Writer(new ArrayBuffer(128));
+        this.writer = new Writer(new ArrayBuffer(256, {maxByteLength: 1 << 27}));
 
         this.writer.writeByte(108); // little endian
         this.writer.writeByte(kind);
@@ -69,10 +69,15 @@ export class Builder {
     }
 
     private writeHeader(id: Header, type: DataType, value: ScalarValue) {
+        const serializer = getValueSerializer(type);
+        const required = 4 + serializer.estimateBytesLength(value);
+        const {buffer} = this.writer.view;
+        if (required > buffer.byteLength - this.writer.position)
+            buffer.resize(buffer.byteLength * 2);
+
         this.writer.writeByte(id);
         signatureSerializer.serializeInto(this.writer, type);
-        getValueSerializer(type)
-            .serializeInto(this.writer, value);
+        serializer.serializeInto(this.writer, value);
     }
 
     build(serializer: Serializer, values: ReadonlyArray<Value>): ArrayBuffer {
