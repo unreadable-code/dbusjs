@@ -41,8 +41,11 @@ export class Writer {
     }
 
     pad(size: number): number {
-        size -= this.offset % size;
-        return this.offset += size;
+        const remainder = this.offset % size;
+        if (remainder)
+            this.offset += size - remainder;
+
+        return this.offset;
     }
 
     seek(offset: number): void {
