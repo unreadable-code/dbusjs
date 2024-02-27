@@ -13,7 +13,7 @@ export {
 
 export {
     DataType,
-    SerializationError,
+    type Serializer,
     parseSignature,
 } from "./serialization";
 

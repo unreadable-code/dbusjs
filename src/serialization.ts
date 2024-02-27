@@ -18,16 +18,6 @@ export enum DataType {
     Double = "d",
 }
 
-export class SerializationError extends Error {
-    constructor(
-        public readonly signature: string,
-        public readonly data: unknown,
-        message: string,
-    ) {
-        super(message);
-    }
-}
-
 export class Writer {
     private offset: number = 0;
     readonly view: DataView;
@@ -193,7 +183,7 @@ class PrimitiveSerializer implements Serializer {
     };
 }
 
-class StructSerializer implements Serializer {
+export class StructSerializer implements Serializer {
     alignment!: number;
     signature: string;
 
