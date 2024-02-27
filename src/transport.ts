@@ -76,10 +76,6 @@ export const enum AuthMethod {
     Anonymous = "ANONYMOUS",
 }
 
-const serialOffset = 8;
-const messageBodySizeOffset = 4
-const headerFieldsSizeOffset = 12;
-
 export class Connection {
     private nextCallID = 32;
     private responseHandlers = new Map<number, (data: Reader) => void>();
@@ -118,8 +114,10 @@ export class Connection {
 
         // The data received might be multiple messages concatenated
         do {
-            const bodySize = view.getUint32(messageBodySizeOffset, true);
-            const headerFieldsSize = view.getUint32(headerFieldsSizeOffset, true);
+            const reader = new Reader(view);
+
+            const bodySize = reader.getBodySize();
+            const headerFieldsSize = reader.getHeaderFieldsSize();
             const messageSize = 16 + 8 * Math.trunc((headerFieldsSize + 7) / 8) + bodySize;
 
             // Handle incomplete message
@@ -129,12 +127,14 @@ export class Connection {
                 return;
             }
 
-            const messageID = view.getUint32(serialOffset, true);
-            const handler = this.responseHandlers.get(messageID);
-            if (handler) {
-                // Handle a call response
-                handler(new Reader(new DataView(view.buffer, view.byteOffset, messageSize)));
-                this.responseHandlers.delete(messageID);
+            const messageID = reader.getReplySerial();
+            if (messageID) {
+                const handler = this.responseHandlers.get(messageID);
+                if (handler) {
+                    // Handle a call response
+                    handler(new Reader(new DataView(view.buffer, view.byteOffset, messageSize)));
+                    this.responseHandlers.delete(messageID);
+                }
             }
 
             view = new DataView(view.buffer, view.byteOffset + messageSize);
@@ -144,8 +144,8 @@ export class Connection {
     sendAndReceive(value: ArrayBuffer): Promise<Reader> {
         const callID = this.nextCallID;
         this.nextCallID = callID > (1 << 31) ? 1 : callID + 1;
-        new DataView(value).setUint32(serialOffset, callID, true);
-        return new Promise((resolve) => {
+        new DataView(value).setUint32(8, callID, true);
+        return new Promise(resolve => {
             // TODO: Implement timeouts
             this.responseHandlers.set(callID, resolve);
             this.socket.write(new Uint8Array(value));
@@ -245,12 +245,6 @@ export class Bus {
         message.setHeader(Header.Destination, DataType.String, service);
         message.setHeader(Header.Path, DataType.ObjectPath, path);
         const reader = await this.connection.sendAndReceive(message.build());
-        for (const limit = reader.getHeaderFieldsSize(); reader.position < limit;) {
-            const [id,, value] = reader.readHeaderField();
-            if (id === Header.Signature && value !== "s")
-                throw new Error("Response type invalid");
-        }
-
         reader.skipToBody();
         const data = reader.readString();
         return IntrospectionResult.parse(data);
