@@ -3,7 +3,6 @@ import {createConnection, type Socket} from "net";
 import {DataType} from ".";
 import {IntrospectionResult} from "./introspection";
 import {Builder as MessageBuilder, Header, Kind as MessageKind, Reader} from "./message";
-import {emptySerializer} from "./serialization";
 
 export interface UnixDomainAddress {
     transport: "unix";
@@ -82,7 +81,7 @@ const messageBodySizeOffset = 4
 const headerFieldsSizeOffset = 12;
 
 export class Connection {
-    private nextCallID = 1;
+    private nextCallID = 32;
     private responseHandlers = new Map<number, (data: Reader) => void>();
 
     // The parts of a multi-part message
@@ -92,7 +91,7 @@ export class Connection {
     private receiveDue: number = 0;
 
     constructor(private readonly socket: Socket) {
-        this.socket.on("data", this.onData.bind(this));
+        this.socket.addListener("data", this.onData.bind(this));
     }
 
     close(): void {
@@ -144,7 +143,7 @@ export class Connection {
 
     sendAndReceive(value: ArrayBuffer): Promise<Reader> {
         const callID = this.nextCallID;
-        this.nextCallID = callID > (1 << 31) ? 1 : callID + 2;
+        this.nextCallID = callID > (1 << 31) ? 1 : callID + 1;
         new DataView(value).setUint32(serialOffset, callID, true);
         return new Promise((resolve) => {
             // TODO: Implement timeouts
@@ -170,6 +169,18 @@ export class Connection {
     ): void {
         socket.write("\0");
 
+        function introduce(): void {
+            const message = new MessageBuilder(MessageKind.Call);
+            message.setHeader(Header.Path, DataType.ObjectPath, "/org/freedesktop/DBus");
+            message.setHeader(Header.Member, DataType.String, "Hello");
+            message.setHeader(Header.Interface, DataType.String, "org.freedesktop.DBus");
+            message.setHeader(Header.Destination, DataType.String, "org.freedesktop.DBus");
+
+            const connection = new Connection(socket);
+            connection.sendAndReceive(message.build())
+                .then(() => resolve(connection), reject);
+        }
+
         function proposeAuth(socket: Socket, method: string): void {
             switch (method) {
             case AuthMethod.External:
@@ -181,7 +192,7 @@ export class Connection {
                 break;
 
             default:
-                socket.off("data", onHandshakeData);
+                socket.removeListener("data", onHandshakeData);
                 reject(new Error(`Unsupported dbus auth method ${method}`));
             }
         }
@@ -193,10 +204,10 @@ export class Connection {
             const delimiterIndex = bufferedText.indexOf("\r\n");
             if (delimiterIndex > -1) {
                 if (bufferedText.startsWith("OK ")) {
-                    socket.off("data", onHandshakeData);
-                    socket.write("BEGIN\r\n", () => resolve(new Connection(socket)));
+                    socket.removeListener("data", onHandshakeData);
+                    socket.write("BEGIN\r\n", introduce);
                 } else if (nextMethod === methods.length) {
-                    socket.off("data", onHandshakeData);
+                    socket.removeListener("data", onHandshakeData);
                     reject(new Error("No auth methods can be used"));
                 } else {
                     proposeAuth(socket, methods[++nextMethod]);
@@ -206,7 +217,7 @@ export class Connection {
             }
         }
 
-        socket.on("data", onHandshakeData);
+        socket.addListener("data", onHandshakeData);
         proposeAuth(socket, methods[0]);
     }
 
@@ -222,20 +233,18 @@ export class Connection {
     }
 }
 
-const introspectionMessageBuilder = new MessageBuilder(MessageKind.Call);
-introspectionMessageBuilder.setHeader(Header.Interface, DataType.String, "org.freedesktop.DBus.Introspectable");
-introspectionMessageBuilder.setHeader(Header.Member, DataType.String, "Introspect");
-
 export class Bus {
     constructor(private readonly connection: Connection) {
         // do nothing
     }
 
     async introspect(path: string, service: string): Promise<IntrospectionResult> {
-        introspectionMessageBuilder.setHeader(Header.Destination, DataType.String, service);
-        introspectionMessageBuilder.setHeader(Header.Path, DataType.ObjectPath, path);
-        const message = introspectionMessageBuilder.build(emptySerializer, []);
-        const reader = await this.connection.sendAndReceive(message);
+        const message = new MessageBuilder(MessageKind.Call);
+        message.setHeader(Header.Interface, DataType.String, "org.freedesktop.DBus.Introspectable");
+        message.setHeader(Header.Member, DataType.String, "Introspect");
+        message.setHeader(Header.Destination, DataType.String, service);
+        message.setHeader(Header.Path, DataType.ObjectPath, path);
+        const reader = await this.connection.sendAndReceive(message.build());
         for (const limit = reader.getHeaderFieldsSize(); reader.position < limit;) {
             const [id,, value] = reader.readHeaderField();
             if (id === Header.Signature && value !== "s")
