@@ -1,4 +1,6 @@
-import {DataType, XMLError} from ".";
+import {XMLParser} from "fast-xml-parser";
+
+import {DataType} from ".";
 
 export interface ValueSpecification {
     name: string;
@@ -11,41 +13,30 @@ export interface ValueSpecification {
     write?: boolean;
 }
 
-function mapValueSpecifications(
-    elements: Iterable<Node>,
-    nodeName: string,
-    decorator: (v: ValueSpecification, attrs: Element) => void,
+function mapValueSpecifications<T extends SignalArgumentDefinition>(
+    elements: Iterable<T>,
+    decorator: (v: ValueSpecification, attrs: T) => void,
 ): ValueSpecification[] {
     const result = [];
 
     for (const e of elements) {
-        if (isElement(e) && e.nodeName === "arg") {
-            const v: ValueSpecification = {
-                name: e.getAttribute("name")!,
-                type: e.getAttribute("type") as unknown as DataType,
-            };
-
-            decorator(v, e);
-            result.push(v);
-        }
+        const v = e as ValueSpecification;
+        decorator(v as ValueSpecification, e);
+        result.push(v);
     }
 
     return result;
 }
 
-function isElement(node: Node): node is Element {
-    return node.nodeType === Node.ELEMENT_NODE;
-}
-
 export class MethodSpecification {
     readonly arguments: ReadonlyArray<ValueSpecification>;
 
-    constructor(e: Element) {
-        this.arguments = mapValueSpecifications(e.childNodes, "arg", MethodSpecification.decorateArg);
+    constructor(d: MethodDefinition) {
+        this.arguments = mapValueSpecifications(d.arg, MethodSpecification.decorateArg);
     }
 
-    private static decorateArg(v: ValueSpecification, e: Element): void {
-        if (e.getAttribute("direction") === "out")
+    private static decorateArg(v: ValueSpecification, e: MethodArgumentDefinition): void {
+        if (e.direction === "out")
             v.read = true;
         else
             v.write = true;
@@ -55,8 +46,8 @@ export class MethodSpecification {
 export class SignalSpecification {
     readonly arguments: ReadonlyArray<ValueSpecification>;
 
-    constructor(e: Element) {
-        this.arguments = mapValueSpecifications(e.childNodes, "arg", SignalSpecification.decorateArg);
+    constructor(d: SignalDefinition) {
+        this.arguments = mapValueSpecifications(d.arg, SignalSpecification.decorateArg);
     }
 
     private static decorateArg(v: ValueSpecification): void {
@@ -64,13 +55,13 @@ export class SignalSpecification {
     }
 }
 
-function mapProperty(e: Element): ValueSpecification {
+function mapProperty(d: PropertyDefinition): ValueSpecification {
     const v: ValueSpecification = {
-        name: e.getAttribute("name")!,
-        type: e.getAttribute("type") as unknown as DataType,
+        name: d.name,
+        type: d.type as unknown as DataType,
     };
 
-    switch (e.getAttribute("access")) {
+    switch (d.access) {
     case "read":
         v.read = true;
         break;
@@ -92,66 +83,81 @@ export class InterfaceSpecification {
     readonly signals: ReadonlyArray<SignalSpecification>;
     readonly properties: ReadonlyArray<ValueSpecification>;
 
-    constructor(specification: Element) {
-        const methods = [];
-        const signals = [];
-        const properties = [];
+    constructor(definition: InterfaceDefinition) {
+        this.methods = Array.isArray(definition.method)
+            ? definition.method.map(v => new MethodSpecification(v))
+            : [new MethodSpecification(definition.method)];
 
-        for (const child of specification.children) {
-            if (!isElement(child))
-                continue;
+        this.signals = Array.isArray(definition.signal)
+            ? definition.signal.map(v => new SignalSpecification(v))
+            : [new MethodSpecification(definition.signal)];
 
-            switch (child.nodeName) {
-            case "method":
-                methods.push(new MethodSpecification(child));
-                break;
-
-            case "signal":
-                signals.push(new SignalSpecification(child));
-                break;
-
-            case "property":
-                properties.push(mapProperty(child));
-                break;
-            }
-        }
-
-        this.methods = methods;
-        this.signals = signals;
-        this.properties = properties;
+        this.properties = Array.isArray(definition.property)
+            ? definition.property.map(mapProperty)
+            : [mapProperty(definition.property)];
     }
 }
 
-export class NodeSpecification {
-    constructor() {
-        // do nothing
-    }
+interface SignalArgumentDefinition {
+    name: string;
+    type: string;
 }
+
+interface PropertyDefinition extends SignalArgumentDefinition {
+    access: "read" | "write" | "readwrite";
+}
+
+interface MethodArgumentDefinition extends SignalArgumentDefinition {
+    direction: "in" | "out";
+}
+
+interface MethodDefinition {
+    name: string;
+    arg: MethodArgumentDefinition[];
+}
+
+interface SignalDefinition {
+    name: string;
+    arg: SignalArgumentDefinition[];
+}
+
+interface InterfaceDefinition {
+    name: string;
+    method: MethodDefinition[];
+    signal: SignalDefinition[];
+    property: PropertyDefinition[];
+}
+
+interface NodeDefinition {
+    interface: InterfaceDefinition[];
+}
+
+interface IntrospectionXML {
+    node: NodeDefinition;
+}
+
+const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: "",
+});
 
 export class IntrospectionResult {
-    private constructor(private readonly document: Document) {
-        // do nothing
+    readonly interfaces: InterfaceDefinition[];
+
+    private constructor(document: IntrospectionXML) {
+        this.interfaces = document.node.interface;
     }
 
     getInterface(name: string): InterfaceSpecification | null {
-        const element = this.document.querySelector(`interface[name="${name}"]`);
-        return element && new InterfaceSpecification(element);
-    }
+        for (const i of this.interfaces)
+            if (i.name === name)
+                return new InterfaceSpecification(i);
 
-    getNode(name: string): NodeSpecification | null {
-        const element = this.document.querySelector(`node[name="${name}"]`);
-        return element && new NodeSpecification();
+        return null;
     }
-
-    private static readonly parser = new DOMParser();
 
     static parse(xml: string): IntrospectionResult {
-        const doc = this.parser.parseFromString(xml, "text/xml");
-
-        const root = doc.firstElementChild;
-        if (!root || root.nodeName === "parsererror")
-            throw new XMLError(doc, "Unable to parse interface semantics");
-
+        const doc = parser.parse(xml, false) as IntrospectionXML;
         return new IntrospectionResult(doc);
     }
 }
