@@ -123,7 +123,7 @@ export class InterfaceSpecification {
 }
 
 export class NodeSpecification {
-    constructor(specification: Element) {
+    constructor() {
         // do nothing
     }
 }
@@ -140,7 +140,7 @@ export class IntrospectionResult {
 
     getNode(name: string): NodeSpecification | null {
         const element = this.document.querySelector(`node[name="${name}"]`);
-        return element && new NodeSpecification(element);
+        return element && new NodeSpecification();
     }
 
     private static readonly parser = new DOMParser();
