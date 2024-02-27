@@ -27,17 +27,6 @@ export const enum Header {
     Signature,
 }
 
-export interface Headers {
-    destination?: string;
-    path?: string;
-    interface?: string;
-    member?: string;
-    replySerial?: number;
-    errorName?: string;
-    sender?: string;
-    signature?: string;
-}
-
 interface HeaderValue {
     type: DataType;
     value: ScalarValue;

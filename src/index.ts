@@ -1,9 +1,3 @@
-export class XMLError extends Error {
-    constructor(readonly document: XMLDocument, message: string) {
-        super(message);
-    }
-}
-
 export {
     type InterfaceSpecification,
     type IntrospectionResult,
@@ -14,7 +8,6 @@ export {
 
 export {
     Builder as MessageBuilder,
-    type Headers,
     Kind,
 } from "./message";
 
