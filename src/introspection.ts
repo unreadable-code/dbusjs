@@ -1,6 +1,7 @@
 import {XMLParser} from "fast-xml-parser";
 
 import {DataType} from ".";
+import {type Serializer, StructSerializer, parseSignature} from "./serialization";
 
 export interface ValueSpecification {
     name: string;
@@ -29,9 +30,11 @@ function mapValueSpecifications<T extends SignalArgumentDefinition>(
 }
 
 export class MethodSpecification {
+    readonly name: string;
     readonly arguments: ReadonlyArray<ValueSpecification>;
 
     constructor(d: MethodDefinition) {
+        this.name = d.name;
         this.arguments = mapValueSpecifications(d.arg, MethodSpecification.decorateArg);
     }
 
@@ -41,12 +44,21 @@ export class MethodSpecification {
         else
             v.write = true;
     }
+
+    private argumentsSerializer?: Serializer;
+    getArgumentsSerializer(): Serializer {
+        return this.argumentsSerializer
+            || (this.argumentsSerializer = new StructSerializer(
+                this.arguments.map(a => parseSignature(a.type))));
+    }
 }
 
 export class SignalSpecification {
+    readonly name: string;
     readonly arguments: ReadonlyArray<ValueSpecification>;
 
     constructor(d: SignalDefinition) {
+        this.name = d.name;
         this.arguments = mapValueSpecifications(d.arg, SignalSpecification.decorateArg);
     }
 
@@ -78,6 +90,14 @@ function mapProperty(d: PropertyDefinition): ValueSpecification {
     return v;
 }
 
+function getByName<T extends {name: string}>(values: Iterable<T>, name: string): T | null {
+    for (const candidate of values)
+        if (candidate.name === name)
+            return candidate;
+
+    return null;
+}
+
 export class InterfaceSpecification {
     readonly methods: ReadonlyArray<MethodSpecification>;
     readonly signals: ReadonlyArray<SignalSpecification>;
@@ -95,6 +115,18 @@ export class InterfaceSpecification {
         this.properties = Array.isArray(definition.property)
             ? definition.property.map(mapProperty)
             : [mapProperty(definition.property)];
+    }
+
+    getMethod(name: string): MethodSpecification | null {
+        return getByName(this.methods, name);
+    }
+
+    getSignal(name: string): SignalSpecification | null {
+        return getByName(this.signals, name);
+    }
+
+    getProperty(name: string): ValueSpecification | null {
+        return getByName(this.properties, name);
     }
 }
 
@@ -149,11 +181,8 @@ export class IntrospectionResult {
     }
 
     getInterface(name: string): InterfaceSpecification | null {
-        for (const i of this.interfaces)
-            if (i.name === name)
-                return new InterfaceSpecification(i);
-
-        return null;
+        const d = getByName(this.interfaces, name);
+        return d && new InterfaceSpecification(d);
     }
 
     static parse(xml: string): IntrospectionResult {

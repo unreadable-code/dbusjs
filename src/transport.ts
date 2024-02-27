@@ -238,16 +238,22 @@ export class Bus {
         // do nothing
     }
 
-    async introspect(path: string, service: string): Promise<IntrospectionResult> {
+    introspect(path: string, service: string): Promise<IntrospectionResult> {
         const message = new MessageBuilder(MessageKind.Call);
         message.setHeader(Header.Interface, DataType.String, "org.freedesktop.DBus.Introspectable");
         message.setHeader(Header.Member, DataType.String, "Introspect");
         message.setHeader(Header.Destination, DataType.String, service);
         message.setHeader(Header.Path, DataType.ObjectPath, path);
-        const reader = await this.connection.sendAndReceive(message.build());
-        reader.skipToBody();
-        const data = reader.readString();
-        return IntrospectionResult.parse(data);
+
+        return this.invoke(message).then(reader => {
+            reader.skipToBody();
+            const xml = reader.readString();
+            return IntrospectionResult.parse(xml);
+        });
+    }
+
+    invoke(message: MessageBuilder): Promise<Reader> {
+        return this.connection.sendAndReceive(message.build());
     }
 }
 
