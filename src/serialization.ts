@@ -41,10 +41,7 @@ export class Writer {
     }
 
     pad(size: number): number {
-        const remainder = this.offset % size;
-        if (remainder)
-            this.offset += size - remainder;
-
+        this.offset = size * Math.trunc((this.offset + size - 1) / size);
         return this.offset;
     }
 

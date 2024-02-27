@@ -195,7 +195,6 @@ export class Reader {
     }
 
     skipToBody(): void {
-        const p = 16 + this.getHeaderFieldsSize();
-        this.offset = 8 + Math.floor(p / 8);
+        this.offset = 16 + 8 * Math.trunc((this.getHeaderFieldsSize() + 7) / 8);
     }
 }

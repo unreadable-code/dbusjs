@@ -120,7 +120,7 @@ export class Connection {
         do {
             const bodySize = view.getUint32(messageBodySizeOffset, true);
             const headerFieldsSize = view.getUint32(headerFieldsSizeOffset, true);
-            const messageSize = Math.trunc(1 + (16 + headerFieldsSize) / 8) * 8 + bodySize;
+            const messageSize = 16 + 8 * Math.trunc((headerFieldsSize + 7) / 8) + bodySize;
 
             // Handle incomplete message
             if (messageSize > view.byteLength) {
