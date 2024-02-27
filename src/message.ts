@@ -70,17 +70,20 @@ export class Builder {
 
     private writeHeader(id: Header, type: DataType, value: ScalarValue) {
         const serializer = getValueSerializer(type);
-        const required = 4 + serializer.estimateBytesLength(value);
+        const required = 7 + 4 + serializer.estimateBytesLength(value);
         const {buffer} = this.writer.view;
         if (required > buffer.byteLength - this.writer.position)
             buffer.resize(buffer.byteLength * 2);
 
+        this.writer.pad(8);
         this.writer.writeByte(id);
         signatureSerializer.serializeInto(this.writer, type);
         serializer.serializeInto(this.writer, value);
     }
 
-    build(serializer: Serializer, values: ReadonlyArray<Value>): ArrayBuffer {
+    build(): ArrayBuffer;
+    build(serializer: Serializer, values: ReadonlyArray<Value>): ArrayBuffer;
+    build(serializer?: Serializer, values?: ReadonlyArray<Value>): ArrayBuffer {
         this.writer.seek(16);
 
         for (let n = 1; n < this.headers.length; ++n) {
@@ -89,19 +92,23 @@ export class Builder {
                 this.writeHeader(n, header.type, header.value);
         }
 
-        this.writeHeader(Header.Signature, DataType.TypeSignature, serializer.signature);
+        if (serializer)
+            this.writeHeader(Header.Signature, DataType.TypeSignature, serializer.signature);
 
         // header fields array size is always aligned at 12
-        this.writer.view.setUint32(12, this.writer.position, true);
+        this.writer.view.setUint32(12, this.writer.position - 16, true);
 
         // must ensure body is aligned to 8 bytes
-        this.writer.pad(8);
-        const bodyStart = this.writer.position;
-
-        const bodySize = serializer.estimateBytesLength(values);
-        this.writer.view.buffer.resize(this.writer.position + bodySize);
-        serializer.serializeInto(this.writer, values);
-        this.writer.view.setUint32(4, bodyStart - this.writer.position, true);
+        // this padding like with arrays, is always necessary
+        const bodyStart = this.writer.pad(8);
+        if (serializer) {
+            const bodySize = serializer.estimateBytesLength(values!);
+            this.writer.view.buffer.resize(this.writer.position + bodySize);
+            serializer.serializeInto(this.writer, values!);
+            this.writer.view.setUint32(4, this.writer.position - bodyStart, true);
+        } else {
+            this.writer.view.setUint32(4, 0, true);
+        }
 
         return this.writer.cloneData();
     }
