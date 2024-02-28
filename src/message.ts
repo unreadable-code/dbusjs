@@ -8,7 +8,7 @@ import {
     signatureSerializer,
 } from "./serialization";
 
-export const enum Kind {
+export enum Kind {
     Invalid = 0,
     Call,
     Return,
@@ -16,7 +16,7 @@ export const enum Kind {
     Signal,
 }
 
-export const enum Header {
+export enum Header {
     Path = 1,
     Interface,
     Member,
