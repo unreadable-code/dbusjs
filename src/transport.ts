@@ -4,6 +4,8 @@ import {DataType} from ".";
 import {IntrospectionResult} from "./introspection";
 import {Builder as MessageBuilder, Header, Kind as MessageKind, Reader} from "./message";
 
+import type {Serializer, Value} from "./serialization";
+
 export interface UnixDomainAddress {
     transport: "unix";
     guid?: string;
@@ -252,8 +254,10 @@ export class Bus {
         });
     }
 
-    invoke(message: MessageBuilder): Promise<Reader> {
-        return this.connection.sendAndReceive(message.build());
+    invoke(message: MessageBuilder): Promise<Reader>;
+    invoke(message: MessageBuilder, serializer: Serializer, args: ReadonlyArray<Value>): Promise<Reader>
+    invoke(message: MessageBuilder, serializer?: Serializer, args?: ReadonlyArray<Value>): Promise<Reader> {
+        return this.connection.sendAndReceive(message.build(serializer!, args!));
     }
 }
 
