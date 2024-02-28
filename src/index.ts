@@ -8,7 +8,8 @@ export {
 
 export {
     Builder as MessageBuilder,
-    Kind,
+    Kind as MessageKind,
+    Header as MessageHeader,
 } from "./message";
 
 export {
@@ -20,6 +21,7 @@ export {
 export {
     type Address,
     type AuthMethod,
+    type Bus,
     type UnixDomainAbstractAddress,
     type UnixDomainPathAddress,
     type UnixDomainSocketAddress,
