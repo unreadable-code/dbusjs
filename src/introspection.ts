@@ -29,13 +29,20 @@ function mapValueSpecifications<T extends SignalArgumentDefinition>(
     return result;
 }
 
+function ensureArray<T>(value: T | T[] | null): T[] {
+    if (!value)
+        return [];
+
+    return Array.isArray(value) ? value : [value];
+}
+
 export class MethodSpecification {
     readonly name: string;
     readonly arguments: ReadonlyArray<ValueSpecification>;
 
     constructor(d: MethodDefinition) {
         this.name = d.name;
-        this.arguments = mapValueSpecifications(d.arg, MethodSpecification.decorateArg);
+        this.arguments = mapValueSpecifications(ensureArray(d.arg), MethodSpecification.decorateArg);
     }
 
     private static decorateArg(v: ValueSpecification, e: MethodArgumentDefinition): void {
@@ -59,7 +66,7 @@ export class SignalSpecification {
 
     constructor(d: SignalDefinition) {
         this.name = d.name;
-        this.arguments = mapValueSpecifications(d.arg, SignalSpecification.decorateArg);
+        this.arguments = mapValueSpecifications(ensureArray(d.arg), SignalSpecification.decorateArg);
     }
 
     private static decorateArg(v: ValueSpecification): void {
@@ -104,17 +111,9 @@ export class InterfaceSpecification {
     readonly properties: ReadonlyArray<ValueSpecification>;
 
     constructor(definition: InterfaceDefinition) {
-        this.methods = Array.isArray(definition.method)
-            ? definition.method.map(v => new MethodSpecification(v))
-            : [new MethodSpecification(definition.method)];
-
-        this.signals = Array.isArray(definition.signal)
-            ? definition.signal.map(v => new SignalSpecification(v))
-            : [new MethodSpecification(definition.signal)];
-
-        this.properties = Array.isArray(definition.property)
-            ? definition.property.map(mapProperty)
-            : [mapProperty(definition.property)];
+        this.methods = ensureArray(definition.method).map(v => new MethodSpecification(v));
+        this.signals = ensureArray(definition.signal).map(v => new SignalSpecification(v));
+        this.properties = ensureArray(definition.property).map(mapProperty);
     }
 
     getMethod(name: string): MethodSpecification | null {
