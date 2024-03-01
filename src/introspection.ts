@@ -56,7 +56,7 @@ export class MethodSpecification {
     getArgumentsSerializer(): Serializer {
         return this.argumentsSerializer
             || (this.argumentsSerializer = new StructSerializer(
-                this.arguments.map(a => parseSignature(a.type))));
+                this.arguments.map(a => parseSignature(a.type)[0])));
     }
 }
 
