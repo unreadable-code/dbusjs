@@ -373,17 +373,17 @@ class SerializerBuilder {
         }
     }
 
-    build(signature: string): StructSerializer {
+    build(signature: string): Serializer[] {
         if (this.incomplete.length > 1)
             throw new Error(`Incomplete DBus signature: ${signature}`);
 
-        return new StructSerializer(this.current.elements);
+        return this.current.elements;
     }
 }
 
 // type ReservedTypeCode = "rem*?@&^";
 
-export function parseSignature(signature: string): StructSerializer {
+export function parseSignature(signature: string): Serializer[] {
     const builder = new SerializerBuilder();
 
     for (let index = 0; index < signature.length; ++index) {
@@ -406,8 +406,11 @@ export function parseSignature(signature: string): StructSerializer {
         }
 
         const candidate = getValueSerializer(token);
-        if (!candidate)
+        if (candidate)
+            builder.add(candidate);
+        else
             throw new Error(`Unrecognized token "${token}" in DBus signature: ${signature}`);
+
     }
 
     return builder.build(signature);
