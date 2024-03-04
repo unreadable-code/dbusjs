@@ -10,6 +10,7 @@ export {
     Builder as MessageBuilder,
     Kind as MessageKind,
     Header as MessageHeader,
+    Reader as MessageReader,
 } from "./message";
 
 export {

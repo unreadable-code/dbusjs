@@ -78,9 +78,14 @@ export const enum AuthMethod {
     Anonymous = "ANONYMOUS",
 }
 
+interface MessageHandler {
+    (reader: Reader): void
+}
+
 export class Connection {
     private nextCallID = 32;
-    private responseHandlers = new Map<number, (data: Reader) => void>();
+    private responseHandlers = new Map<number, MessageHandler>();
+    private signalHandlers = new Map<string, MessageHandler>();
 
     // The parts of a multi-part message
     private receivedParts: Uint8Array[] = [];
@@ -94,6 +99,41 @@ export class Connection {
 
     close(): void {
         this.socket.end();
+    }
+
+    addSignalHandler(name: string, handler: MessageHandler): void {
+        this.signalHandlers.set(name, handler);
+    }
+
+    private dispatchSignal(reader: Reader): void {
+        let signalName = ".";
+        for (let limit = reader.getHeaderFieldsSize(); reader.position < limit;) {
+            const [id,, value] = reader.readHeaderField();
+            switch (id) {
+            case Header.Interface:
+                signalName = value as string + signalName;
+                break;
+
+            case Header.Member:
+                signalName = signalName + value as string;
+                break;
+            }
+        }
+
+        const handler = this.signalHandlers.get(signalName);
+        if (handler)
+            handler(reader);
+    }
+
+    private dispatchReturn(reader: Reader): void {
+        const messageID = reader.getReplySerial();
+        if (messageID) {
+            const handler = this.responseHandlers.get(messageID);
+            if (handler) {
+                handler(reader);
+                this.responseHandlers.delete(messageID);
+            }
+        }
     }
 
     private onData(data: Uint8Array): void {
@@ -116,7 +156,7 @@ export class Connection {
 
         // The data received might be multiple messages concatenated
         do {
-            const reader = new Reader(view);
+            let reader = new Reader(view);
 
             const bodySize = reader.getBodySize();
             const headerFieldsSize = reader.getHeaderFieldsSize();
@@ -129,14 +169,16 @@ export class Connection {
                 return;
             }
 
-            const messageID = reader.getReplySerial();
-            if (messageID) {
-                const handler = this.responseHandlers.get(messageID);
-                if (handler) {
-                    // Handle a call response
-                    handler(new Reader(new DataView(view.buffer, view.byteOffset, messageSize)));
-                    this.responseHandlers.delete(messageID);
-                }
+            reader = new Reader(new DataView(view.buffer, view.byteOffset, messageSize));
+
+            switch (reader.getKind()) {
+            case MessageKind.Signal:
+                this.dispatchSignal(reader);
+                break;
+
+            case MessageKind.Return:
+                this.dispatchReturn(reader);
+                break;
             }
 
             view = new DataView(view.buffer, view.byteOffset + messageSize);
@@ -258,6 +300,10 @@ export class Bus {
     invoke(message: MessageBuilder, serializer: Serializer, args: ReadonlyArray<Value>): Promise<Reader>
     invoke(message: MessageBuilder, serializer?: Serializer, args?: ReadonlyArray<Value>): Promise<Reader> {
         return this.connection.sendAndReceive(message.build(serializer!, args!));
+    }
+
+    addSignalListener(iface: string, member: string, handler: MessageHandler): void {
+        this.connection.addSignalHandler(`${iface}.${member}`, handler);
     }
 }
 
