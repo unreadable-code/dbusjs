@@ -120,6 +120,10 @@ export class Reader {
         return this.offset;
     }
 
+    getKind(): Kind {
+        return this.view.getUint8(1);
+    }
+
     getHeaderFieldsSize(): number {
         return this.view.getUint32(12, true);
     }
@@ -186,7 +190,9 @@ export class Reader {
 
     private decodeString(length: number): string {
         const offset = this.view.byteOffset + this.offset;
-        return utf8Decoder.decode(new Uint8Array(this.view.buffer, offset, length));
+        const result = utf8Decoder.decode(new Uint8Array(this.view.buffer, offset, length));
+        this.offset += length + 1;
+        return result;
     }
 
     readString(): string {
@@ -223,5 +229,13 @@ export class Reader {
     skipToBody(): void {
         this.offset = 16 + this.getHeaderFieldsSize();
         this.align(8);
+    }
+
+    seek(bytes: number): void {
+        this.offset = bytes;
+    }
+
+    eof(): boolean {
+        return this.offset >= this.view.byteLength;
     }
 }
