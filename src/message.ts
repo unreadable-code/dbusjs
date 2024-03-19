@@ -20,7 +20,7 @@ export enum Header {
     Path = 1,
     Interface,
     Member,
-    ErorrName,
+    ErrorName,
     ReplySerial,
     Destination,
     Sender,
@@ -48,7 +48,7 @@ export class Builder {
     setHeader(id: Header.Path, type: DataType.ObjectPath, value: string): void;
     setHeader(id: Header.Interface, type: DataType.String, value: string): void;
     setHeader(id: Header.Member, type: DataType.String, value: string): void;
-    setHeader(id: Header.ErorrName, type: DataType.String, value: string): void;
+    setHeader(id: Header.ErrorName, type: DataType.String, value: string): void;
     setHeader(id: Header.ReplySerial, type: DataType.Unsigned32, value: number): void;
     setHeader(id: Header.Destination, type: DataType.String, value: string): void;
     setHeader(id: Header.Sender, type: DataType.String, value: string): void;
