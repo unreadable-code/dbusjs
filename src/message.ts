@@ -82,7 +82,10 @@ export class Builder {
         }
 
         if (serializer)
-            this.writeHeader(Header.Signature, DataType.TypeSignature, serializer.signature);
+            this.writeHeader(
+                Header.Signature,
+                DataType.TypeSignature,
+                serializer.signature.slice(1, serializer.signature.length - 1));
 
         // header fields array size is always aligned at 12
         this.writer.view.setUint32(12, this.writer.position - 16, true);
@@ -171,18 +174,21 @@ export class Reader {
     }
 
     readUint16(): number {
+        this.align(2);
         const result = this.view.getUint16(this.offset, true);
         this.offset += 2;
         return result;
     }
 
     readUint32(): number {
+        this.align(4);
         const result = this.view.getUint32(this.offset, true);
         this.offset += 4;
         return result;
     }
 
     readUint64(): bigint {
+        this.align(8);
         const result = this.view.getBigUint64(this.offset, true);
         this.offset += 8;
         return result;
