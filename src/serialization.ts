@@ -234,6 +234,7 @@ class ArraySerializer implements Serializer {
         const values = value as ReadonlyArray<Value>;
 
         const sizeFieldPosition = writer.pad(4);
+        writer.seek(sizeFieldPosition + 4);
 
         // dbus specification says even 0 length arrays include element padding
         // and that its size field don't include said padding
@@ -244,9 +245,7 @@ class ArraySerializer implements Serializer {
             this.element.serializeInto(writer, values[n]);
 
         const endPosition = writer.position;
-        writer.seek(sizeFieldPosition);
-        writer.writeUInt32(endPosition - elementsPosition - 4);
-        writer.seek(endPosition);
+        writer.view.setUint32(sizeFieldPosition, endPosition - elementsPosition, true);
     }
 }
 
