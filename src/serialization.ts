@@ -188,7 +188,7 @@ export class StructSerializer implements Serializer {
     signature: string;
 
     constructor(private readonly fields: Serializer[]) {
-        this.signature = `(${fields.map(f => f.signature).join()})`;
+        this.signature = `(${fields.map(f => f.signature).join("")})`;
     }
 
     estimateBytesLength(value: Value): number {
